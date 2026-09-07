@@ -617,6 +617,7 @@ GUI 由四部分组成：
 - 例如选择 `720p` 会写入 `bv*[height<=720]+ba`；选择 `1080p` 会写入 `bv*[height<=1080]+ba`。
 - `1080p 60fps` / `720p 60fps` 会要求 `fps>=60`，不会误选低帧率版本。
 - 要自定义格式时，直接编辑 `Format selection`；下一次选择快速分辨率会再次用预设覆盖它。
+- 如果界面仍不覆盖，请确认启动的是 `gui/run_gui.sh`（不是旧的 `python -m guiapi` 进程），然后重新打开 `Video Format` 页签。
 
 ### `Format sort`
 

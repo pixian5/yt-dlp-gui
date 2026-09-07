@@ -49,3 +49,11 @@ def test_60fps_preset_requires_high_frame_rate():
     app._on_res_selected()
 
     assert app.format.value == 'bv*[height<=1080][fps>=60]+ba'
+
+
+def test_combobox_event_path_uses_same_writer():
+    app = _app('720p')
+
+    app._on_res_selected(object())
+
+    assert app.format.value == 'bv*[height<=720]+ba'

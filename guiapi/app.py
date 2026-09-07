@@ -2357,6 +2357,10 @@ class YtDlpGUI:
         # Trace every value update rather than only <<ComboboxSelected>>. This
         # covers mouse/keyboard selection and programmatic combobox updates.
         self.res_var.trace_add('write', self._on_res_selected)
+        # ttk emits this event after the native dropdown commits a selection;
+        # keep it as a second path because some Tk builds do not fire a
+        # variable trace for readonly combobox mouse selections.
+        self.res_selector.bind('<<ComboboxSelected>>', self._on_res_selected, add='+')
         self.register_translatable_widget(self.res_selector, 'Quick Select Resolution Selector')  # Placeholder to trigger refresh
         row += 1
 
@@ -2398,9 +2402,9 @@ class YtDlpGUI:
 
     def _on_res_selected(self, *_args):
         """Overwrite Format selection with the selected quick-resolution preset."""
-        val = self.res_var.get()
+        val = self.res_var.get().strip()
         preset = next(
-            (key for key in _QUICK_RESOLUTION_FORMATS if val in (key, self.tr(key))),
+            (key for key in _QUICK_RESOLUTION_FORMATS if val == key or val == self.tr(key)),
             None,
         )
         if preset is None or not hasattr(self, 'format'):
