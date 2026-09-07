@@ -1,0 +1,20 @@
+# Python and local environments
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+
+# Local GUI runtime artifacts and user-specific packaging output
+*.log
+*.pid
+build/
+dist/
+*.spec
+.DS_Store
+
+# Never commit local checkout locations or credentials
+.env
+.env.*
+secrets/
