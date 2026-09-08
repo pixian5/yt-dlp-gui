@@ -2344,7 +2344,11 @@ class YtDlpGUI:
         row = 0
 
         ttk.Label(scrollable_frame, text='Format selection:').grid(row=row, column=0, sticky=tk.W, pady=5, padx=5)
-        self.format = ttk.Entry(scrollable_frame, width=50)
+        # Keep the free-form field and quick selector on a shared Tcl variable;
+        # this makes the overwrite visible even on Tk builds with unreliable
+        # ComboboxSelected/trace ordering.
+        self.format_var = tk.StringVar()
+        self.format = ttk.Entry(scrollable_frame, textvariable=self.format_var, width=50)
         self.format.grid(row=row, column=1, columnspan=2, sticky=tk.W, pady=5, padx=5)
         ttk.Label(scrollable_frame, text='(e.g., "bestvideo+bestaudio")').grid(row=row, column=3, sticky=tk.W, pady=5)
         row += 1
@@ -2419,8 +2423,14 @@ class YtDlpGUI:
         if preset is None or not hasattr(self, 'format'):
             return
 
-        self.format.delete(0, tk.END)
-        self.format.insert(0, _QUICK_RESOLUTION_FORMATS[preset])
+        format_value = _QUICK_RESOLUTION_FORMATS[preset]
+        if hasattr(self, 'format_var'):
+            self.format_var.set(format_value)
+        else:
+            # Compatibility for callers constructing the tab with a legacy
+            # Entry-only test double; the live tab always uses format_var.
+            self.format.delete(0, tk.END)
+            self.format.insert(0, format_value)
         self.trigger_autosave()
 
     def create_subtitle_tab(self, frame=None):
@@ -3604,8 +3614,11 @@ class YtDlpGUI:
             args.append('--rm-cache-dir')
 
         # Video format options
-        if self.format.get():
-            args.extend(['-f', self.format.get()])
+        # The Entry and quick selector share format_var, so this is the single
+        # source of truth for both what the user sees and what yt-dlp receives.
+        format_value = self.format.get()
+        if format_value:
+            args.extend(['-f', format_value])
         if self.format_sort.get():
             args.extend(['--format-sort', self.format_sort.get()])
         if self.prefer_free_formats.get():
