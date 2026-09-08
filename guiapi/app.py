@@ -2370,6 +2370,10 @@ class YtDlpGUI:
             '<<ComboboxSelected>>',
             lambda _event, selector=self.res_selector: self._on_res_selected(selector),
         )
+        # macOS Tk can update the native readonly value without emitting
+        # ``<<ComboboxSelected>>``.  Read the committed value after the mouse
+        # release as a final UI path so a real click always updates the field.
+        self.res_selector.bind('<ButtonRelease-1>', self._on_res_mouse_release, add='+')
         self.register_translatable_widget(self.res_selector, 'Quick Select Resolution Selector')  # Placeholder to trigger refresh
         row += 1
 
@@ -2439,6 +2443,12 @@ class YtDlpGUI:
             self.format.delete(0, tk.END)
             self.format.insert(0, format_value)
         self.trigger_autosave()
+
+    def _on_res_mouse_release(self, event):
+        """Apply a native macOS Combobox selection after it is committed."""
+        selector = getattr(event, 'widget', None)
+        if selector is not None:
+            self.root.after_idle(lambda: self._on_res_selected(selector))
 
     def create_subtitle_tab(self, frame=None):
         """Create Subtitle Options tab"""

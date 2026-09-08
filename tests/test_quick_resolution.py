@@ -58,3 +58,17 @@ def test_combobox_event_path_uses_same_writer():
     app._on_res_selected(selector)
 
     assert app.format.value == 'bv*[height<=480]+ba'
+
+
+def test_native_mouse_release_reads_committed_combobox_value():
+    app = _app('')
+    callbacks = []
+    app.root = SimpleNamespace(after_idle=lambda callback: callbacks.append(callback))
+    selector = SimpleNamespace(get=lambda: '360p')
+    event = SimpleNamespace(widget=selector)
+
+    app._on_res_mouse_release(event)
+    assert len(callbacks) == 1
+
+    callbacks[0]()
+    assert app.format.value == 'bv*[height<=360]+ba'
