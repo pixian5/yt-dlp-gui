@@ -2364,7 +2364,12 @@ class YtDlpGUI:
         # ttk emits this event after the native dropdown commits a selection;
         # keep it as a second path because some Tk builds do not fire a
         # variable trace for readonly combobox mouse selections.
-        self.res_selector.bind('<<ComboboxSelected>>', self._on_res_selected)
+        # Pass the combobox itself: macOS Tk can update the visible readonly
+        # value without updating its linked StringVar.
+        self.res_selector.bind(
+            '<<ComboboxSelected>>',
+            lambda _event, selector=self.res_selector: self._on_res_selected(selector),
+        )
         self.register_translatable_widget(self.res_selector, 'Quick Select Resolution Selector')  # Placeholder to trigger refresh
         row += 1
 
@@ -2410,8 +2415,10 @@ class YtDlpGUI:
         # value before the linked Tcl variable trace runs. Read the event
         # widget first so the actual click always wins; trace callbacks still
         # use res_var as the fallback.
+        selector = args[0] if args and hasattr(args[0], 'get') else None
         event = args[0] if args and hasattr(args[0], 'widget') else None
-        selector = getattr(event, 'widget', None)
+        if selector is None:
+            selector = getattr(event, 'widget', None)
         if selector is not None and hasattr(selector, 'get'):
             val = selector.get().strip()
         else:

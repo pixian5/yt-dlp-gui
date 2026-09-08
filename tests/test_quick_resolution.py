@@ -55,6 +55,6 @@ def test_combobox_event_path_uses_same_writer():
     app = _app('')
     selector = SimpleNamespace(get=lambda: '480p')
 
-    app._on_res_selected(SimpleNamespace(widget=selector))
+    app._on_res_selected(selector)
 
     assert app.format.value == 'bv*[height<=480]+ba'
