@@ -2360,7 +2360,7 @@ class YtDlpGUI:
         # ttk emits this event after the native dropdown commits a selection;
         # keep it as a second path because some Tk builds do not fire a
         # variable trace for readonly combobox mouse selections.
-        self.res_selector.bind('<<ComboboxSelected>>', self._on_res_selected, add='+')
+        self.res_selector.bind('<<ComboboxSelected>>', self._on_res_selected)
         self.register_translatable_widget(self.res_selector, 'Quick Select Resolution Selector')  # Placeholder to trigger refresh
         row += 1
 
@@ -2400,9 +2400,18 @@ class YtDlpGUI:
         self.audio_multistreams.grid(row=row, column=1, sticky=tk.W, pady=5, padx=5)
         row += 1
 
-    def _on_res_selected(self, *_args):
+    def _on_res_selected(self, *args):
         """Overwrite Format selection with the selected quick-resolution preset."""
-        val = self.res_var.get().strip()
+        # On some Tk/macOS builds the readonly combobox updates its displayed
+        # value before the linked Tcl variable trace runs. Read the event
+        # widget first so the actual click always wins; trace callbacks still
+        # use res_var as the fallback.
+        event = args[0] if args and hasattr(args[0], 'widget') else None
+        selector = getattr(event, 'widget', None)
+        if selector is not None and hasattr(selector, 'get'):
+            val = selector.get().strip()
+        else:
+            val = self.res_var.get().strip()
         preset = next(
             (key for key in _QUICK_RESOLUTION_FORMATS if val == key or val == self.tr(key)),
             None,

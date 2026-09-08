@@ -52,8 +52,9 @@ def test_60fps_preset_requires_high_frame_rate():
 
 
 def test_combobox_event_path_uses_same_writer():
-    app = _app('720p')
+    app = _app('')
+    selector = SimpleNamespace(get=lambda: '480p')
 
-    app._on_res_selected(object())
+    app._on_res_selected(SimpleNamespace(widget=selector))
 
-    assert app.format.value == 'bv*[height<=720]+ba'
+    assert app.format.value == 'bv*[height<=480]+ba'
