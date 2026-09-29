@@ -8,6 +8,5 @@ thin avoids a second startup path with different state or environment setup.
 
 from .app import main
 
-
 if __name__ == '__main__':
     main()

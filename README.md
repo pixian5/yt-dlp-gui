@@ -1,29 +1,29 @@
 # yt-dlp GUI（独立外挂）使用说明
 
-本目录是 **yt-dlp 的 GUI 外挂**，不包含、不修改也不补丁 `yt_dlp/` 核心代码。原仓库的唯一自定义内容是 `gui/`；上游更新不会与该目录重叠，GUI 通过子进程调用原版核心。
+本项目是**独立的 yt-dlp GUI 外挂**，不包含、不修改也不补丁 `yt_dlp/` 核心代码。GUI 通过子进程调用核心 CLI；两个仓库可各自更新。默认从同级目录寻找 `yt-dlp` 核心，也可用 `YT_DLP_CORE_DIR` 显式指定。
 
 ## 当前开发进度
 
-已合并上游 `master` 至 `51bab8a01`，GUI 外挂仍与核心代码隔离；当前版本：`0.0.9`。验证记录见[当前开发进度](docs/20260929233448-当前开发进度.md)。
+GUI 已按子目录历史拆分到同级项目 `yt-dlp-gui` 并通过验证（12 项测试通过、静态检查通过、启动与停止冒烟正常），当前版本 `0.1.0`；核心仓库中的旧 `gui/` 将在本仓库验收后移除。进度详情见[当前开发进度](docs/20260929235312-当前开发进度.md)。
 
 ## 下一步待实现
 
-将 `gui/` 拆成独立仓库和发布物，并通过稳定 CLI 适配层对接 yt-dlp 核心；方案见[下一步待实现](docs/20260929233448-下一步待实现.md)。
+删除核心仓库旧 `gui/` 并推送独立远端（当前受 `gh` 凭据失效阻塞），把散落的 `python -m yt_dlp` 命令收敛为单一 CLI 适配层，并补齐兼容矩阵与打包。详见[下一步待实现](docs/20260929235312-下一步待实现.md)。
 
 ## 目录关系与启动
 
 默认目录布局：
 
 ```text
-/Users/x/code/yt-dlp/
-├── yt_dlp/       # 原版核心代码：直接同步 https://github.com/yt-dlp/yt-dlp
-└── gui/          # 本项目：仅 GUI、文档和启动器
+/Users/x/code/
+├── yt-dlp/       # 原版核心代码：跟踪 https://github.com/yt-dlp/yt-dlp
+└── yt-dlp-gui/   # 本项目：GUI、文档和启动器
 ```
 
 在 GUI 项目中运行：
 
 ```bash
-cd /Users/x/code/yt-dlp/gui
+cd /Users/x/code/yt-dlp-gui
 ./run_gui.sh
 ```
 
@@ -625,7 +625,7 @@ GUI 由四部分组成：
 - 例如选择 `720p` 会写入 `bv*[height<=720]+ba`；选择 `1080p` 会写入 `bv*[height<=1080]+ba`。
 - `1080p 60fps` / `720p 60fps` 会要求 `fps>=60`，不会误选低帧率版本。
 - 要自定义格式时，直接编辑 `Format selection`；下一次选择快速分辨率会再次用预设覆盖它。
-- 如果界面仍不覆盖，请确认启动的是 `gui/run_gui.sh`（不是旧的 `python -m guiapi` 进程），然后重新打开 `Video Format` 页签。
+- 如果界面仍不覆盖，请确认启动的是 `run_gui.sh`（不是旧的 `python -m guiapi` 进程），然后重新打开 `Video Format` 页签。
 
 ### `Format sort`
 

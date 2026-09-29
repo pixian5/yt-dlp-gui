@@ -63,7 +63,7 @@ def test_combobox_event_path_uses_same_writer():
 def test_native_mouse_release_reads_committed_combobox_value():
     app = _app('')
     callbacks = []
-    app.root = SimpleNamespace(after_idle=lambda callback: callbacks.append(callback))
+    app.root = SimpleNamespace(after_idle=callbacks.append)
     selector = SimpleNamespace(get=lambda: '360p')
     event = SimpleNamespace(widget=selector)
 

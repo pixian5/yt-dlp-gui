@@ -34,7 +34,7 @@ def test_playlist_preflight_passes_youtube_language_to_core():
     app._parse_process = None
     app.root = SimpleNamespace(after=lambda *_args: None)
     app.log_message = lambda *_args: None
-    app._subprocess_env = lambda: {}
+    app._subprocess_env = dict
 
     captured = []
 

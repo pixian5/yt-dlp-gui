@@ -7,9 +7,8 @@ for reference only and are deliberately not imported here.
 """
 
 from .app import YtDlpGUI, main
-from .constants import LANGUAGE_OPTIONS, SB_CATEGORIES, GUI_DEFAULT_STATE
+from .constants import GUI_DEFAULT_STATE, LANGUAGE_OPTIONS, SB_CATEGORIES
 from .translations import TRANSLATIONS
-
 
 __all__ = [
     'GUI_DEFAULT_STATE',

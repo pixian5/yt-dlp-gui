@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
-# Launcher script for the in-repository yt-dlp GUI sidecar.
+# Launcher for the standalone yt-dlp GUI project.
 # Behavior:
 # 1) Stops the previous GUI process recorded in run_gui.pid.
 # 2) Starts the GUI and writes PID to run_gui.pid; logs appended to run_gui.log.
@@ -8,16 +8,24 @@ set -euo pipefail
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PIDFILE="$DIR/run_gui.pid"
 LOGFILE="$DIR/run_gui.log"
-CORE_DIR="${YT_DLP_CORE_DIR:-$DIR/..}"
-CORE_DIR="$(cd "$CORE_DIR" && pwd)"
+CORE_DIR="${YT_DLP_CORE_DIR:-}"
+if [ -z "$CORE_DIR" ]; then
+  if [ -f "$DIR/../yt-dlp/yt_dlp/__init__.py" ]; then
+    CORE_DIR="$DIR/../yt-dlp"
+  else
+    CORE_DIR="$DIR/.."
+  fi
+fi
 
 # The sidecar never writes into CORE_DIR. Reuse its virtualenv when it exists
 # so GUI subprocesses and the original yt-dlp core use identical dependencies.
 # Otherwise use a sidecar venv, then fall back to the system Python.
 if [ ! -f "$CORE_DIR/yt_dlp/__init__.py" ]; then
-  echo "[run_gui] Invalid YT_DLP_CORE_DIR: $CORE_DIR" >&2
+  echo "[run_gui] Invalid yt-dlp core directory: $CORE_DIR" >&2
+  echo "[run_gui] Set YT_DLP_CORE_DIR to a directory containing yt_dlp/__init__.py" >&2
   exit 2
 fi
+CORE_DIR="$(cd "$CORE_DIR" && pwd)"
 
 # Activate the sidecar venv if present.
 if [ -f "$DIR/.venv/bin/activate" ]; then

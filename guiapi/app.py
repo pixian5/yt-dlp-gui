@@ -8,23 +8,23 @@ preflight work runs in daemon threads and communicates back through
 new asynchronous action.
 """
 
+import atexit
 import contextlib
 import json
 import locale
 import os
 import shlex
-import sys
-import tkinter as tk
-from tkinter import ttk, filedialog, messagebox, scrolledtext
-import threading
-import subprocess
 import signal
+import subprocess
+import sys
 import tempfile
-import atexit
+import threading
 import time
+import tkinter as tk
+from tkinter import filedialog, messagebox, scrolledtext, ttk
 
+from guiapi.constants import GUI_DEFAULT_STATE, LANGUAGE_OPTIONS, SB_CATEGORIES
 from guiapi.core import core_env
-from guiapi.constants import LANGUAGE_OPTIONS, SB_CATEGORIES, GUI_DEFAULT_STATE
 from guiapi.translations import TRANSLATIONS
 
 # Never persist these auth fields to ~/.yt-dlp-gui-config.json
@@ -1051,10 +1051,8 @@ class YtDlpGUI:
         self.playlist_requested_entries = None
         self.vis_to_orig = {}
         if hasattr(self, 'playlist_tree'):
-            try:
+            with contextlib.suppress(Exception):
                 self.playlist_tree.delete(*self.playlist_tree.get_children())
-            except Exception:
-                pass
 
     def _parse_request_is_current(self, generation):
         return (not self._closing
@@ -1126,14 +1124,14 @@ class YtDlpGUI:
         button_frame.grid(row=1, column=0, columnspan=2, pady=10)
         # 在 macOS 上，使用 tk.Label 模拟按钮是实现纯色背景最可靠的方法
         self.download_btn = tk.Label(button_frame, text='Download',
-                                    bg='#28a745', fg='white',
-                                    width=15, height=1,
-                                    relief=tk.RAISED, cursor='hand2')
-        self.download_btn.pack(side=tk.LEFT, padx=5, ipady=3) # 增加内边距让它更高一点
+                                     bg='#28a745', fg='white',
+                                     width=15, height=1,
+                                     relief=tk.RAISED, cursor='hand2')
+        self.download_btn.pack(side=tk.LEFT, padx=5, ipady=3)  # 增加内边距让它更高一点
 
         # 绑定点击事件：在松开鼠标时触发下载
-        self.download_btn.bind('<ButtonRelease-1>', lambda e: self._handle_label_release(e))
-        self.download_btn.bind('<ButtonPress-1>', lambda e: self._handle_label_press(e))
+        self.download_btn.bind('<ButtonRelease-1>', self._handle_label_release)
+        self.download_btn.bind('<ButtonPress-1>', self._handle_label_press)
 
         self.register_translatable_widget(self.download_btn, 'Download')
 
@@ -1297,11 +1295,11 @@ class YtDlpGUI:
         self.bulk_canvas.bind('<Leave>', lambda e: self.bulk_canvas.unbind_all('<MouseWheel>'))
         self.bulk_canvas.bind('<Enter>', lambda e: [
             self.bulk_canvas.bind_all('<Button-4>', self._on_batch_mousewheel),
-            self.bulk_canvas.bind_all('<Button-5>', self._on_batch_mousewheel)
+            self.bulk_canvas.bind_all('<Button-5>', self._on_batch_mousewheel),
         ], add='+')
         self.bulk_canvas.bind('<Leave>', lambda e: [
             self.bulk_canvas.unbind_all('<Button-4>'),
-            self.bulk_canvas.unbind_all('<Button-5>')
+            self.bulk_canvas.unbind_all('<Button-5>'),
         ], add='+')
 
     def _on_batch_mousewheel(self, event):
@@ -1489,8 +1487,8 @@ class YtDlpGUI:
                         cmd.append(url)
                         env = self._subprocess_env()
                         result = subprocess.run(
-                            cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                            timeout=45, env=env, **self._subprocess_text_kwargs())
+                            cmd, capture_output=True, timeout=45, env=env,
+                            **self._subprocess_text_kwargs())
                         title = ''
                         if result.stdout:
                             info = json.loads(result.stdout)
@@ -1669,7 +1667,6 @@ class YtDlpGUI:
             self.root.after(0, lambda: self.status_var.set(self.tr('Ready')))
             return
 
-        content = '\n'.join(normalized)
         self.root.after(0, lambda: self._restore_bulk_rows(normalized))
         self.root.after(0, lambda: self.batch_file_var.set(''))
         self.log_message(self.translate_concat('Batch parsed: ', f'{len(normalized)}') + self.tr(' URL(s) ready.'))
@@ -4034,7 +4031,7 @@ class YtDlpGUI:
         self.on_download_btn_click()
 
     def on_download_btn_click(self):
-        self.log_message(self.tr("[DEBUG] Download button clicked."))
+        self.log_message(self.tr('[DEBUG] Download button clicked.'))
         if getattr(self, '_download_running', False) or getattr(self, 'current_process', None) or getattr(self, '_parse_running', False):
             self.stop_download()
         else:
@@ -4183,7 +4180,7 @@ class YtDlpGUI:
         output_dir = self.get_control_text('output_dir')
         if not output_dir:
             with contextlib.suppress(tk.TclError, Exception):
-                output_dir = str(getattr(self, 'output_dir').get() or '').strip()
+                output_dir = str(self.output_dir.get() or '').strip()
         self.log_message(self.translate_concat('[DEBUG] output_dir=', f'{output_dir!r}'))
 
         playlist_parsed_url = getattr(self, 'playlist_parsed_url', None)
@@ -4200,7 +4197,7 @@ class YtDlpGUI:
         playlist_mode = bool(
             playlist_parsed_url
             and self.media_urls_equal(url, playlist_parsed_url)
-            and hasattr(self, 'playlist_tree')
+            and hasattr(self, 'playlist_tree'),
         )
         if playlist_mode and (bulk_urls or batch_file_value):
             self.log_message(
@@ -4439,9 +4436,9 @@ class YtDlpGUI:
                                 return
                             start_idx = current_loaded + 1
                             end_idx = min(start_idx + 99, playlist_count)
-                            range_str = f"{start_idx}-{end_idx}"
+                            range_str = f'{start_idx}-{end_idx}'
 
-                            self.log_message(self.translate_concat(f'[DEBUG] Pagination: Fetching items ', f'{range_str}...'))
+                            self.log_message(self.translate_concat('[DEBUG] Pagination: Fetching items ', f'{range_str}...'))
 
                             page_cmd = cmd.copy()
                             page_cmd.extend(['--playlist-items', range_str])
@@ -4597,7 +4594,7 @@ class YtDlpGUI:
                 filtered_entries = list(reversed(filtered_entries))
 
             self.vis_to_orig = {}
-            for j, (display_idx, original_idx, title) in enumerate(filtered_entries):
+            for display_idx, original_idx, title in filtered_entries:
                 # Map the number shown in the # column back to the original playlist index
                 self.vis_to_orig[display_idx] = original_idx
                 status_char = '☐' if getattr(self, '_is_from_bulk_parse', False) else '☑'
@@ -4680,10 +4677,10 @@ class YtDlpGUI:
 
         if clean_msg.startswith('[download] Destination:'):
             filename = clean_msg.split(':', 1)[1].strip()
-            self.root.title(f"{self.tr(self.base_title)} - {os.path.basename(filename)}")
+            self.root.title(f'{self.tr(self.base_title)} - {os.path.basename(filename)}')
         elif 'has already been downloaded' in clean_msg and clean_msg.startswith('[download]'):
             filename = clean_msg.replace('[download]', '').split('has already been downloaded')[0].strip()
-            self.root.title(f"{self.tr(self.base_title)} - {os.path.basename(filename)}")
+            self.root.title(f'{self.tr(self.base_title)} - {os.path.basename(filename)}')
 
         # Redirect [download] progress to the status bar instead of the console
         # Typically looks like: [download]  1.2% of 10.00MiB at ...

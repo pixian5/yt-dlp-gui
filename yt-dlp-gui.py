@@ -10,6 +10,5 @@ The GUI is a sidecar and starts the original core through ``PYTHONPATH``.
 
 from guiapi import main
 
-
 if __name__ == '__main__':
     main()

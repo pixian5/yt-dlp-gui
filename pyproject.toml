@@ -1,0 +1,124 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "yt-dlp-gui"
+dynamic = ["version"]
+description = "Standalone Tk GUI sidecar for yt-dlp"
+readme = "README.md"
+requires-python = ">=3.10"
+
+[project.scripts]
+yt-dlp-gui = "guiapi:main"
+
+[project.optional-dependencies]
+dev = [
+    "autopep8~=2.0",
+    "pytest~=9.0",
+    "ruff~=0.16.0",
+]
+
+[tool.setuptools.dynamic]
+version = { file = "VERSION" }
+
+[tool.setuptools.packages.find]
+include = ["guiapi", "guiapi.*"]
+exclude = ["guiapi._legacy", "guiapi._legacy.*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = ["-ra", "--tb=short"]
+
+[tool.ruff]
+line-length = 120
+exclude = ["guiapi/_legacy/**"]
+
+[tool.ruff.lint]
+select = [
+    "E", "W", "F", "I", "Q", "N803", "N804", "UP", "B", "A", "COM",
+    "C4", "FA", "ISC", "PIE", "T20", "RSE", "RET504", "SIM", "TD",
+    "PLC", "PLE", "PLW", "RUF",
+]
+ignore = [
+    "E402", "E501", "E731", "E741", "UP031", "UP036", "B006", "B008",
+    "B011", "B017", "B023", "B028", "B904", "A005", "C401", "C402",
+    "PIE790", "SIM102", "SIM108", "SIM112", "SIM113", "SIM114", "SIM115",
+    "SIM117", "SIM223", "SIM300", "TD001", "TD002", "TD003", "PLC0415",
+    "PLE0604", "PLE0643", "PLW0603", "PLW1510", "PLW1641", "PLW2901",
+    "RUF001", "RUF002", "RUF003", "RUF012", "RUF100", "T20",
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["guiapi"]
+relative-imports-order = "closest-to-furthest"
+
+[tool.ruff.lint.flake8-quotes]
+docstring-quotes = "double"
+multiline-quotes = "single"
+inline-quotes = "single"
+avoid-escape = false
+
+[tool.autopep8]
+max_line_length = 120
+recursive = true
+exit-code = true
+jobs = 0
+select = [
+    "E101",
+    "E112",
+    "E113",
+    "E115",
+    "E116",
+    "E117",
+    "E121",
+    "E122",
+    "E123",
+    "E124",
+    "E125",
+    "E126",
+    "E127",
+    "E128",
+    "E129",
+    "E131",
+    "E201",
+    "E202",
+    "E203",
+    "E211",
+    "E221",
+    "E222",
+    "E223",
+    "E224",
+    "E225",
+    "E226",
+    "E227",
+    "E228",
+    "E231",
+    "E241",
+    "E242",
+    "E251",
+    "E252",
+    "E261",
+    "E262",
+    "E265",
+    "E266",
+    "E271",
+    "E272",
+    "E273",
+    "E274",
+    "E275",
+    "E301",
+    "E302",
+    "E303",
+    "E304",
+    "E305",
+    "E306",
+    "E502",
+    "E701",
+    "E702",
+    "E704",
+    "W391",
+    "W504",
+]
+exclude = "*/_legacy/*,*venv*,.idea,.vscode"
+

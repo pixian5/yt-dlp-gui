@@ -1,32 +1,42 @@
-# 核心与 GUI 的隔离约定
+# GUI 外挂与 yt-dlp 核心的独立项目边界
 
-`gui/` 是 `yt-dlp` 仓库内的独立外挂目录，`yt-dlp` 的其它文件仍是未修改的上游核心。两者必须始终保持以下边界：
+GUI 已从 yt-dlp 核心仓库的 `gui/` 子树拆分到同级目录 `/Users/x/code/yt-dlp-gui`，与核心仓库 `/Users/x/code/yt-dlp` 各自使用独立 Git 历史和版本。迁移测试通过后，核心仓库中的旧 `gui/` 才会移除。
 
-1. GUI 项目可以读取核心路径并在子进程中导入 `yt_dlp`，但不得在核心目录创建、编辑或删除文件。
-2. GUI 不得修改 `yt_dlp/`、`pyproject.toml`、核心版本文件、核心 CLI 入口或核心 `.gitignore`。
-3. 除 `gui/` 外，核心仓库不得保留任何自定义补丁。上游更新只会影响上游文件，`git pull upstream master` 可自动合并，不需要手工处理 GUI 冲突。
-4. GUI 功能、启动器、GUI 文档和 GUI 配置只在 `gui/` 内维护和提交。
+必须保持以下边界：
+
+1. GUI 不导入 `yt_dlp` 私有 Python 模块；所有核心操作通过独立子进程运行 `python -m yt_dlp`。
+2. GUI 不在核心目录创建、编辑或删除文件。
+3. 默认从 GUI 同级目录 `../yt-dlp` 定位核心；也可设置 `YT_DLP_CORE_DIR` 指向任意包含 `yt_dlp/__init__.py` 的源码检出。
+4. GUI 版本、依赖、测试、文档与发布都由 `yt-dlp-gui` 仓库独立维护。
+5. 更新核心时运行 GUI 的命令组装与核心路径兼容测试；不向核心重放 GUI 补丁。
+
+## 当前目录结构
+
+```text
+/Users/x/code/
+├── yt-dlp/       # yt-dlp 核心源码仓库
+└── yt-dlp-gui/   # 独立 GUI 项目
+```
 
 ## 绑定核心
 
-默认核心路径是外挂目录的父目录 `..`。若使用其他 checkout，在启动时设置：
+同级布局下直接运行 `./run_gui.sh` 即可。使用其它核心检出时：
 
 ```bash
 YT_DLP_CORE_DIR=/absolute/path/to/yt-dlp ./run_gui.sh
 ```
 
-`guiapi.core` 会验证 `yt_dlp/__init__.py` 存在，并只为 GUI 创建的 `python -m yt_dlp` 子进程注入该路径到 `PYTHONPATH`。这既保留了原版 yt-dlp 的升级能力，也避免在 GUI 中复制或补丁核心代码。
+`guiapi.core` 会验证 `yt_dlp/__init__.py` 存在，并仅为 GUI 创建的子进程注入核心目录到 `PYTHONPATH`。
 
-## 更新流程
+## 上游更新流程
 
 ```bash
-# 同步官方上游；只要上游不创建 gui/，不会与外挂冲突
 cd /Users/x/code/yt-dlp
-git pull upstream master
+git fetch upstream
+git merge upstream/master
 
-# GUI：只在外挂目录维护
-cd /Users/x/code/yt-dlp/gui
-./run_gui.sh
+cd /Users/x/code/yt-dlp-gui
+.venv/bin/python -m pytest
 ```
 
-核心升级后应进行一次 GUI 冒烟检查：确认 `YT_DLP_CORE_DIR` 能被解析，并使用 GUI 的 List Formats 或 Extract Info 验证子进程能导入新核心。
+核心升级后应确认 GUI 测试通过，并通过核心 CLI 的版本/提取器冒烟；GUI 界面手工验收与自动测试分开记录。
