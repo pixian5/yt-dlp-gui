@@ -9,10 +9,15 @@ venv/
 # Local GUI runtime artifacts and user-specific packaging output
 *.log
 *.pid
-build/
 dist/
-*.spec
+*.spec.bak
 .DS_Store
+
+# PyInstaller build artifacts (keep build/*.spec, build/*.sh, build/make_icon.py)
+build/.work/
+build/icon.iconset/
+build/yt-dlp-gui/
+build/yt-dlp-cli/
 
 # Never commit local checkout locations or credentials
 .env
@@ -21,3 +26,6 @@ secrets/
 
 # Python packaging metadata
 *.egg-info/
+
+# WorkBuddy 工作目录（项目记忆等，不入库）
+.workbuddy/
