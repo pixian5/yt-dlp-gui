@@ -24,6 +24,19 @@ SB_CATEGORIES = [
 ]
 
 
+QUICK_RESOLUTION_FORMATS = {
+    'Best (Auto)': 'bestvideo+bestaudio/best',
+    '4K (2160p)': 'bv*[height<=2160]+ba',
+    '2K (1440p)': 'bv*[height<=1440]+ba',
+    '1080p 60fps': 'bv*[height<=1080][fps>=60]+ba',
+    '1080p': 'bv*[height<=1080]+ba',
+    '720p 60fps': 'bv*[height<=720][fps>=60]+ba',
+    '720p': 'bv*[height<=720]+ba',
+    '480p': 'bv*[height<=480]+ba',
+    '360p': 'bv*[height<=360]+ba',
+}
+
+
 GUI_DEFAULT_STATE = {
     # These values are stored under the config's ``gui_state`` object. Secrets
     # are intentionally absent; authentication fields are runtime-only.

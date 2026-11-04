@@ -2,8 +2,7 @@
 """Public package surface for the yt-dlp Tk GUI.
 
 The package re-exports the live :class:`guiapi.app.YtDlpGUI` class and its
-``main`` entry point. Historical mixins under ``guiapi/_legacy`` are retained
-for reference only and are deliberately not imported here.
+``main`` entry point.
 """
 
 from .app import YtDlpGUI, main

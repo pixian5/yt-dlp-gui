@@ -4,11 +4,11 @@
 
 ## 当前开发进度
 
-GUI 已按子目录历史拆分到同级项目 `yt-dlp-gui` 并通过验证（12 项测试通过、静态检查通过、启动与停止冒烟正常），当前版本 `0.1.2`；已推送到 `https://github.com/pixian5/yt-dlp-gui`，远端 9 月 7 日的旧快照已核对无独有功能并清理。进度详情见[当前开发进度](docs/20260929235312-当前开发进度.md)。
+GUI 已完成核心架构解耦与安全加固（抽离 command_builder、runner、config_store、tab_builders，凭据脱敏，Stop解析强杀闭环，清理 legacy 死代码），48 项自动化测试通过、静态检查全绿，当前版本 `0.1.3`。进度详情见[核心架构解耦与安全防护重构](docs/20261104-1140-核心架构解耦与安全防护重构-Gemini.md)。
 
 ## 下一步待实现
 
-把散落在 `guiapi/app.py` 里的 `python -m yt_dlp` 命令收敛为单一 CLI 适配层，补齐核心版本兼容矩阵与打包流程，并扩充分辨率覆盖、播放列表勾选与批量分页的命令级测试。详见[下一步待实现](docs/20260929235312-下一步待实现.md)。
+继续精简播放列表与批处理管理逻辑，推进跨平台一键式分发，完善多格式矩阵与国际化文案覆盖。详见[下一步待实现](docs/20260929-2353-下一步待实现-未标注.md)。
 
 ## 目录关系与启动
 
@@ -54,6 +54,51 @@ python guiapi-run.py
 ```
 
 GUI 不再向核心包注册 `yt_dlp.main_gui()`；请从本项目的启动器运行。
+
+## 打包为 macOS 应用（.app）
+
+需要双击图标启动、或安装到「应用程序」文件夹时，用 PyInstaller 把 GUI 连同
+`yt_dlp` 核心一起打包成独立的 `yt-dlp-gui.app`。打包脚本位于
+[`build/`](build/)，一条命令即可构建并安装：
+
+```bash
+cd /Users/x/code/yt-dlp-gui
+./build/build_app.sh --install
+```
+
+- 产物：`dist/yt-dlp-gui.app`，`--install` 会 ad-hoc 重签名后装到
+  `/Applications/yt-dlp-gui.app`。
+- 核心定位与运行模式一致：优先 `YT_DLP_CORE_DIR`，否则同级 `../yt-dlp`；
+  打包时该核心源码会被内联进 app。升级核心后需重新打包才会生效。
+- 版本号取自 `VERSION`（写入 `Info.plist` 的 `CFBundleShortVersionString`）。
+- 重新生成图标（仅设计变更时需要）：`python build/make_icon.py`。
+
+不带 `--install` 只产出 `dist/yt-dlp-gui.app` 供检查：
+
+```bash
+./build/build_app.sh
+```
+
+### 打包原理与约束（维护者必读）
+
+- **冻结环境**：`.app` 内 `sys.executable` 是 PyInstaller 引导程序，会忽略
+  `-m yt_dlp`；且没有 `../yt-dlp` 同级目录。因此 [`guiapi/core.py`](guiapi/core.py)
+  在冻结时改由 [`packaging/yt_dlp_cli.py`](packaging/yt_dlp_cli.py) 构建出的
+  独立可执行 `yt-dlp-cli`（内部调用 `yt_dlp.main()`，自带运行时与依赖）来调用核心，
+  由 `core_launcher()` 返回其路径、`core_env()` 跳过 `PYTHONPATH` 注入。源码
+  （开发）模式行为完全不变。
+- 构建脚本会把 `dist/yt-dlp-cli` 复制进 `Contents/MacOS/`，与 GUI 可执行同级；
+  **务必保证 bundle 的主可执行是 `yt-dlp-gui`**（`Info.plist` 的
+  `CFBundleExecutable`），否则 `open -a` 会启动到 helper 而立刻退出。
+- 依赖：在 GUI 虚拟环境安装 `pyinstaller~=6.21`（`build_app.sh` 会检查并提示）。
+- 当前为 **ad-hoc 签名**，仅供本机使用；分发给他人需正式签名与公证。
+
+构建后验证：
+
+```bash
+open -a yt-dlp-gui            # 启动
+osascript -e 'tell application "yt-dlp-gui" to quit'   # 退出
+```
 
 ## 界面总体结构
 

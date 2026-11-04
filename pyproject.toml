@@ -24,7 +24,6 @@ version = { file = "VERSION" }
 
 [tool.setuptools.packages.find]
 include = ["guiapi", "guiapi.*"]
-exclude = ["guiapi._legacy", "guiapi._legacy.*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -32,7 +31,6 @@ addopts = ["-ra", "--tb=short"]
 
 [tool.ruff]
 line-length = 120
-exclude = ["guiapi/_legacy/**"]
 
 [tool.ruff.lint]
 select = [

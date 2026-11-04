@@ -12,6 +12,8 @@ TRANSLATIONS = {
         'Paste Parse Download': '粘贴链接+解析+下载',
         'Stop': '停止',
         'Stopping download...': '正在停止下载...',
+        'Stopping playlist parse...': '正在停止解析播放列表...',
+        'Stopping bulk parse...': '正在停止批量解析...',
         'Download stopped. Would you like to delete partially downloaded files?': '下载已停止。是否要删除未下载完的临时文件？',
         'Video URL(s):': '视频 URL：',
         'Or Batch File:': '或批量文件：',
