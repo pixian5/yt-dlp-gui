@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import contextlib
 import os
+import shutil
 import signal
 import subprocess
 from collections.abc import Callable
@@ -51,6 +52,46 @@ def subprocess_env() -> dict[str, str]:
     env = core_env()
     env['PATH'] = augmented_path(env.get('PATH', ''))
     return env
+
+
+def check_runtime_dependencies(timeout: float = 2.0) -> dict[str, dict[str, Any]]:
+    """检测 ffmpeg, ffprobe, node, deno 等运行时工具链就绪状态与版本。"""
+    tools = ['ffmpeg', 'ffprobe', 'node', 'deno']
+    env = subprocess_env()
+    path_env = env.get('PATH', '')
+    results: dict[str, dict[str, Any]] = {}
+
+    for tool in tools:
+        found_path = shutil.which(tool, path=path_env)
+        version = ''
+        available = bool(found_path)
+
+        if found_path:
+            try:
+                cmd = [found_path, '-version'] if tool in ('ffmpeg', 'ffprobe') else [found_path, '--version']
+                proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, env=env)
+                if proc.returncode == 0:
+                    raw = (proc.stdout or proc.stderr).splitlines()
+                    if raw:
+                        first_line = raw[0].strip()
+                        if tool in ('ffmpeg', 'ffprobe') and 'version' in first_line:
+                            parts = first_line.split()
+                            if len(parts) >= 3 and parts[1] == 'version':
+                                version = parts[2]
+                            else:
+                                version = first_line
+                        else:
+                            version = first_line
+            except Exception:
+                pass
+
+        results[tool] = {
+            'available': available,
+            'path': found_path or '',
+            'version': version,
+        }
+
+    return results
 
 
 def terminate_process(process: subprocess.Popen | None) -> None:

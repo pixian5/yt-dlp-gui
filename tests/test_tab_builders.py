@@ -20,6 +20,8 @@ EXPECTED_TABS = [
     'create_sponsorblock_tab',
     'create_extractor_tab',
     'create_advanced_tab',
+    'create_batch_download_tab',
+    'create_playlist_tab',
 ]
 
 
@@ -46,3 +48,31 @@ def test_build_smart_sub_langs():
     sub_langs = tab_builders.build_smart_sub_langs(app, 'zh-Hans')
     assert 'zh-Hans' in sub_langs
     assert 'en-zh-Hans' in sub_langs
+
+
+def test_swap_rows():
+    class DummyFrame:
+        def __init__(self, name):
+            self.name = name
+            self.packed = True
+
+        def pack_forget(self):
+            self.packed = False
+
+        def pack(self, **kwargs):
+            self.packed = True
+
+    class DummyApp:
+        def __init__(self):
+            self.bulk_rows = [
+                {'frame': DummyFrame('row0'), 'id': 0},
+                {'frame': DummyFrame('row1'), 'id': 1},
+            ]
+
+    app = DummyApp()
+    tab_builders._swap_rows(app, 0, 1)
+    assert app.bulk_rows[0]['id'] == 1
+    assert app.bulk_rows[1]['id'] == 0
+    assert app.bulk_rows[0]['frame'].packed is True
+    assert app.bulk_rows[1]['frame'].packed is True
+

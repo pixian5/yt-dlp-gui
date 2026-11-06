@@ -10,8 +10,11 @@ from __future__ import annotations
 
 import os
 import re
+import shutil
+import subprocess
 import sys
 from pathlib import Path
+from typing import Any
 
 _GUI_ROOT = Path(__file__).resolve().parent.parent
 
@@ -26,32 +29,50 @@ def _is_core_checkout(candidate: Path) -> bool:
     return (candidate / 'yt_dlp' / '__init__.py').is_file()
 
 
-def core_dir() -> Path:
-    """解析指定核心目录，默认查找同级仓库并兼容旧嵌套目录。"""
+def find_core_checkout() -> Path | None:
+    """查找可用的 yt-dlp 源码目录；未找到时返回 None 而非抛出异常。"""
     configured = os.environ.get('YT_DLP_CORE_DIR')
     if configured:
-        candidates = (Path(configured).expanduser(),)
-    else:
-        # 新布局：yt-dlp 与 yt-dlp-gui 是同级目录；旧布局仍允许 GUI 位于核心/gui。
-        candidates = (_GUI_ROOT.parent / 'yt-dlp', _GUI_ROOT.parent)
+        p = Path(configured).expanduser().resolve()
+        return p if _is_core_checkout(p) else None
 
-    for candidate in candidates:
+    for candidate in (_GUI_ROOT.parent / 'yt-dlp', _GUI_ROOT.parent):
         candidate = candidate.resolve()
         if _is_core_checkout(candidate):
             return candidate
 
+    return None
+
+
+def core_dir() -> Path:
+    """解析指定核心目录，默认查找同级仓库并兼容旧嵌套目录。"""
+    configured = os.environ.get('YT_DLP_CORE_DIR')
+    if configured:
+        p = Path(configured).expanduser().resolve()
+        if _is_core_checkout(p):
+            return p
+        raise RuntimeError(
+            'yt-dlp core checkout not found. Set YT_DLP_CORE_DIR to a directory '
+            'that contains yt_dlp/__init__.py, or configure YT_DLP_EXECUTABLE.')
+
+    found = find_core_checkout()
+    if found is not None:
+        return found
+
     raise RuntimeError(
         'yt-dlp core checkout not found. Set YT_DLP_CORE_DIR to a directory '
-        'that contains yt_dlp/__init__.py.')
+        'that contains yt_dlp/__init__.py, or configure YT_DLP_EXECUTABLE.')
 
 
 def core_launcher() -> list[str]:
     """返回调用 yt-dlp 核心 CLI 的命令前缀（不含具体任务参数）。
 
-    开发（源码）模式沿用 ``python -m yt_dlp``，核心源码目录通过
-    ``PYTHONPATH`` 注入。冻结打包后，直接调用与 GUI 一同打包的独立可执行
-    文件 ``yt-dlp-cli``（内部调用 ``yt_dlp.main()``），无需解释器或
-    ``PYTHONPATH``。
+    优先级：
+    1. 冻结（PyInstaller）打包环境：调用内置独立可执行文件 ``yt-dlp-cli``；
+    2. 显式环境变量 ``YT_DLP_EXECUTABLE``：调用指定路径的可执行文件；
+    3. 源码检出目录（同级仓库或 ``YT_DLP_CORE_DIR``）：使用当前 Python 解释器 + 模块启动；
+    4. 系统 PATH 中存在的 ``yt-dlp`` 二进制；
+    5. 回退到 ``python -m yt_dlp``。
     """
     if is_frozen():
         # macOS .app：可执行文件在 Contents/MacOS/，helper 与其同级。
@@ -64,22 +85,84 @@ def core_launcher() -> list[str]:
             return [str(cli)]
         raise RuntimeError(
             'Bundled yt-dlp-cli executable not found next to the frozen GUI.')
+
+    explicit_exe = os.environ.get('YT_DLP_EXECUTABLE')
+    if explicit_exe:
+        exe_path = Path(explicit_exe).expanduser().resolve()
+        if exe_path.is_file():
+            return [str(exe_path)]
+        raise RuntimeError(f'Configured YT_DLP_EXECUTABLE not found: {explicit_exe}')
+
+    if find_core_checkout() is not None:
+        return [sys.executable, '-m', 'yt_dlp']
+
+    system_exe = shutil.which('yt-dlp')
+    if system_exe:
+        return [system_exe]
+
     return [sys.executable, '-m', 'yt_dlp']
 
 
 def core_env() -> dict[str, str]:
     """为 GUI 子进程设置核心源码路径，不修改父进程环境。
 
-    冻结模式下核心与 helper 一同打包，helper 自带解释器与依赖，无需注入
-    ``PYTHONPATH``，因此直接返回当前环境副本。
+    冻结模式与显式可执行文件模式下无需注入 ``PYTHONPATH``；
+    源码模式下自动将找到的 core checkout 目录加入 ``PYTHONPATH``。
     """
     env = os.environ.copy()
-    if is_frozen():
+    if is_frozen() or os.environ.get('YT_DLP_EXECUTABLE'):
         return env
-    core = str(core_dir())
-    existing = env.get('PYTHONPATH', '')
-    env['PYTHONPATH'] = core if not existing else os.pathsep.join((core, existing))
+
+    checkout = find_core_checkout()
+    if checkout is not None:
+        core = str(checkout)
+        existing = env.get('PYTHONPATH', '')
+        env['PYTHONPATH'] = core if not existing else os.pathsep.join((core, existing))
     return env
+
+
+def probe_core_info(timeout: float = 3.0) -> dict[str, Any]:
+    """探测当前绑定的 yt-dlp 核心运行模式、版本与可执行位置。"""
+    launcher = core_launcher()
+    env = core_env()
+
+    if is_frozen():
+        mode = 'frozen'
+    elif os.environ.get('YT_DLP_EXECUTABLE'):
+        mode = 'executable'
+    elif find_core_checkout() is not None:
+        mode = 'source'
+    elif launcher and shutil.which('yt-dlp') and launcher[0] == shutil.which('yt-dlp'):
+        mode = 'system'
+    else:
+        mode = 'source'
+
+    version = 'unknown'
+    try:
+        proc = subprocess.run(
+            [*launcher, '--version'],
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            env=env,
+        )
+        if proc.returncode == 0:
+            version = proc.stdout.strip()
+    except Exception:
+        pass
+
+    location = launcher[0]
+    if mode == 'source':
+        checkout = find_core_checkout()
+        if checkout is not None:
+            location = str(checkout)
+
+    return {
+        'version': version,
+        'mode': mode,
+        'launcher': launcher,
+        'location': location,
+    }
 
 
 _SENSITIVE_FLAGS = {

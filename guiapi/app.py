@@ -30,9 +30,10 @@ from guiapi.config_store import (
     save_config_file,
 )
 from guiapi.constants import GUI_DEFAULT_STATE, LANGUAGE_OPTIONS
-from guiapi.core import core_launcher, sanitize_command
+from guiapi.core import core_launcher, probe_core_info, sanitize_command
 from guiapi.runner import (
     augmented_path,
+    check_runtime_dependencies,
     extra_bin_dirs,
     subprocess_env,
     subprocess_text_kwargs,
@@ -129,6 +130,7 @@ class YtDlpGUI:
         self._active_tab_frame = None
 
         self.current_language = 'en'  # Default for very early calls
+        self.core_version = ''
 
         # Configuration storage
         self.config = {}
@@ -187,6 +189,40 @@ class YtDlpGUI:
         # Set window icon (if available)
         with contextlib.suppress(Exception):
             self.root.iconname('yt-dlp')
+
+        # Probe core & runtime dependencies asynchronously
+        threading.Thread(target=self._run_startup_diagnostics, daemon=True).start()
+
+    def _run_startup_diagnostics(self):
+        """Asynchronously inspect core launcher and external tool dependencies."""
+        try:
+            core_info = probe_core_info()
+            version = core_info.get('version') or 'unknown'
+            mode = core_info.get('mode') or 'source'
+            location = core_info.get('location') or ''
+            self.log_message(f'[INFO] yt-dlp core: {version} (mode: {mode}, path: {location})')
+
+            if version != 'unknown':
+                self.core_version = version
+                self.root.after(0, lambda: self.root.title(f'{self.tr(self.base_title)} ({version})'))
+
+            deps = check_runtime_dependencies()
+            dep_summaries = []
+            for tool, data in deps.items():
+                if data.get('available'):
+                    ver_str = f" ({data['version']})" if data.get('version') else ''
+                    dep_summaries.append(f'{tool}{ver_str}')
+            if dep_summaries:
+                self.log_message(f'[INFO] Runtime tools: {", ".join(dep_summaries)}')
+
+            if not deps.get('ffmpeg', {}).get('available'):
+                self.log_message(
+                    self.tr('[WARNING] ffmpeg not found in PATH! Merging audio/video or postprocessing may fail.'))
+            if not deps.get('node', {}).get('available') and not deps.get('deno', {}).get('available'):
+                self.log_message(
+                    self.tr('[NOTICE] No JS runtime (node/deno) detected. Extraction for some sites (e.g. YouTube n-sig) may be limited.'))
+        except Exception as e:
+            self.log_message(f'[WARNING] Startup diagnostics error: {e}')
 
     def tr(self, text):
         """Translate UI text with English fallback."""
@@ -1188,590 +1224,37 @@ class YtDlpGUI:
         # Apply initial localization based on detected/configured language
         self.apply_localization()
 
-    def create_batch_download_tab(self, frame=None):
-        """Create Batch Download tab."""
-        frame = frame or ttk.Frame(self.notebook, padding='10')
-
-        file_row = ttk.Frame(frame)
-        file_row.pack(fill=tk.X, pady=(0, 8))
-        lbl_file = ttk.Label(file_row, text=self.tr('Batch file path:'))
-        lbl_file.pack(side=tk.LEFT)
-        self.register_translatable_widget(lbl_file, 'Batch file path:')
-
-        self.batch_file_var = tk.StringVar()
-        self.batch_file_var.trace_add('write', self.trigger_autosave)
-        self.batch_file_input = ttk.Entry(file_row, textvariable=self.batch_file_var)
-        self.batch_file_input.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(8, 5))
-        btn_browse = ttk.Button(file_row, text=self.tr('Browse...'), command=self.browse_batch_file)
-        btn_browse.pack(side=tk.LEFT)
-        self.register_translatable_widget(btn_browse, 'Browse...')
-
-        list_row = ttk.Frame(frame)
-        list_row.pack(fill=tk.BOTH, expand=False, pady=(0, 8))
-
-        header_row = ttk.Frame(list_row)
-        header_row.pack(fill=tk.X, pady=(0, 5))
-
-        lbl_list = ttk.Label(header_row, text=self.tr('Batch URLs (one per line):'))
-        lbl_list.pack(side=tk.LEFT)
-        self.register_translatable_widget(lbl_list, 'Batch URLs (one per line):')
-
-        btn_paste_top = ttk.Button(header_row, text=self.tr('Paste to Top'), command=self.paste_bulk_to_top)
-        btn_paste_top.pack(side=tk.LEFT, padx=2)
-        self.register_translatable_widget(btn_paste_top, 'Paste to Top')
-        btn_paste_bottom = ttk.Button(header_row, text=self.tr('Paste to Bottom'), command=self.paste_bulk_to_bottom)
-        btn_paste_bottom.pack(side=tk.LEFT, padx=2)
-        self.register_translatable_widget(btn_paste_bottom, 'Paste to Bottom')
-        btn_parse_all = ttk.Button(header_row, text=self.tr('Parse All'), command=self.parse_all_bulk_urls)
-        btn_parse_all.pack(side=tk.LEFT, padx=2)
-        self.register_translatable_widget(btn_parse_all, 'Parse All')
-
-        # Keep clear pool in header row to the right
-        btn_clear = ttk.Button(header_row, text=self.tr('Clear Pool'), command=self.clear_all_bulk_rows)
-        btn_clear.pack(side=tk.RIGHT)
-        self.register_translatable_widget(btn_clear, 'Clear Pool')
-
-        dyn_container = ttk.Frame(frame)
-        dyn_container.pack(fill=tk.BOTH, expand=True)
-        self.bulk_canvas = tk.Canvas(dyn_container, highlightthickness=0)
-        vsb = ttk.Scrollbar(dyn_container, orient='vertical', command=self.bulk_canvas.yview)
-        self.bulk_scroll_frame = ttk.Frame(self.bulk_canvas)
-        self.bulk_scroll_frame.bind(
-            '<Configure>',
-            lambda e: self.bulk_canvas.configure(scrollregion=self.bulk_canvas.bbox('all')))
-        c_win = self.bulk_canvas.create_window((0, 0), window=self.bulk_scroll_frame, anchor='nw')
-        self.bulk_canvas.bind('<Configure>', lambda e: self.bulk_canvas.itemconfig(c_win, width=e.width))
-        self.bulk_canvas.configure(yscrollcommand=vsb.set)
-        self.bulk_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        vsb.pack(side=tk.RIGHT, fill=tk.Y)
-
-        # Bind mousewheel events for smooth scrolling on this canvas
-        self._bind_batch_mousewheel()
-
-        # Controls row removed: Bulk Paste and Parse Batch buttons were intentionally deleted
-        # per user request. Keep dynamic rows and clear button intact.
-        self.bulk_rows = []
-        self.add_bulk_row()
-
-        return frame
-
-    def _bind_batch_mousewheel(self):
-        self.bulk_canvas.bind('<Enter>', lambda e: self.bulk_canvas.bind_all('<MouseWheel>', self._on_batch_mousewheel))
-        self.bulk_canvas.bind('<Leave>', lambda e: self.bulk_canvas.unbind_all('<MouseWheel>'))
-        self.bulk_canvas.bind('<Enter>', lambda e: [
-            self.bulk_canvas.bind_all('<Button-4>', self._on_batch_mousewheel),
-            self.bulk_canvas.bind_all('<Button-5>', self._on_batch_mousewheel),
-        ], add='+')
-        self.bulk_canvas.bind('<Leave>', lambda e: [
-            self.bulk_canvas.unbind_all('<Button-4>'),
-            self.bulk_canvas.unbind_all('<Button-5>'),
-        ], add='+')
-
-    def _on_batch_mousewheel(self, event):
-        if event.num == 4:
-            self.bulk_canvas.yview_scroll(-2, 'units')
-        elif event.num == 5:
-            self.bulk_canvas.yview_scroll(2, 'units')
-        else:
-            if abs(event.delta) >= 120:
-                scroll_units = -2 * int(event.delta / 120)
-            else:
-                scroll_units = -2 * event.delta
-            self.bulk_canvas.yview_scroll(scroll_units, 'units')
-
-    def _on_drag_start(self, event, row_frame):
-        self._drag_data = {
-            'row': row_frame,
-            'y': event.y_root,
-        }
-
-    def _on_drag_motion(self, event, row_frame):
-        if not hasattr(self, '_drag_data') or not self._drag_data:
-            return
-        delta_y = event.y_root - self._drag_data['y']
-        if abs(delta_y) < 10:
-            return
-        children = self.bulk_scroll_frame.winfo_children()
-        try:
-            idx = children.index(row_frame)
-        except ValueError:
-            return
-        if delta_y > 0 and idx < len(children) - 1:
-            next_row = children[idx + 1]
-            if event.y_root > next_row.winfo_rooty() + (next_row.winfo_height() / 2):
-                self._swap_rows(idx, idx + 1)
-                self._drag_data['y'] = event.y_root
-        elif delta_y < 0 and idx > 0:
-            prev_row = children[idx - 1]
-            if event.y_root < prev_row.winfo_rooty() + (prev_row.winfo_height() / 2):
-                self._swap_rows(idx - 1, idx)
-                self._drag_data['y'] = event.y_root
-
-    def _on_drag_stop(self, event, row_frame):
-        self._drag_data = None
-        self.trigger_autosave()
-
-    def _swap_rows(self, idx1, idx2):
-        self.bulk_rows[idx1], self.bulk_rows[idx2] = self.bulk_rows[idx2], self.bulk_rows[idx1]
-        for r in self.bulk_rows:
-            r['frame'].pack_forget()
-        for r in self.bulk_rows:
-            r['frame'].pack(fill=tk.X, pady=2)
-
-    def add_bulk_row(self, initial_text='', initial_playlist='', auto_parse_playlist=False):
-        row = ttk.Frame(self.bulk_scroll_frame)
-        row.pack(fill=tk.X, pady=2)
-
-        # Add drag handle
-        lbl_drag = ttk.Label(row, text=' ☰ ', cursor='fleur')
-        lbl_drag.pack(side=tk.LEFT, padx=(5, 2))
-        lbl_drag.bind('<Button-1>', lambda e, r=row: self._on_drag_start(e, r))
-        lbl_drag.bind('<B1-Motion>', lambda e, r=row: self._on_drag_motion(e, r))
-        lbl_drag.bind('<ButtonRelease-1>', lambda e, r=row: self._on_drag_stop(e, r))
-
-        var = tk.StringVar(value=initial_text)
-        var.trace_add('write', self.trigger_autosave)
-        entry = ttk.Entry(row, textvariable=var)
-        entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 5))
-
-        playlist_var = tk.StringVar(value=initial_playlist)
-        playlist_var.trace_add('write', self.trigger_autosave)
-        playlist_entry = ttk.Entry(row, textvariable=playlist_var, width=20)
-        playlist_entry.pack(side=tk.LEFT, padx=(0, 5))
-
-        entry.bind('<Return>', lambda e: self._on_bulk_url_return(var.get().strip(), playlist_var) if var.get().strip() else None)
-
-        # USE PLAIN ENGLISH FOR REGISTRATION - TRANSLATION HAPPENS IN apply_localization
-        btn_parse = ttk.Button(row, text=self.tr('Parse'), width=8, command=lambda v=var: self._parse_single_row_url(v.get()))
-        btn_parse.pack(side=tk.LEFT, padx=2)
-        self.register_translatable_widget(btn_parse, 'Parse')
-
-        if len(self.bulk_rows) == 0:
-            btn_add = ttk.Button(row, text='+', width=3, command=self.add_bulk_row)
-            btn_add.pack(side=tk.LEFT)
-        else:
-            btn_remove = ttk.Button(row, text='-', width=3, command=lambda r=row: self.remove_bulk_row(r))
-            btn_remove.pack(side=tk.LEFT)
-        self.bulk_rows.append({'frame': row, 'var': var, 'playlist_var': playlist_var})
-
-        if auto_parse_playlist and initial_text.strip():
-            self._fetch_playlist_title_async(initial_text.strip(), playlist_var)
-
-        # Immediate sync for this newly added row
-        self.localize_widget_tree(row)
-
-    def remove_bulk_row(self, frame):
-        frame.destroy()
-        self.bulk_rows = [r for r in self.bulk_rows if r['frame'] != frame]
-        if not self.bulk_rows:
-            self.add_bulk_row()
-        self.trigger_autosave()
-
-    def remove_batch_row(self, frame):
-        """Compatibility alias for previous function name."""
-        self.remove_bulk_row(frame)
-
-    def _extract_urls_from_clipboard(self):
-        """Extract HTTP URLs from clipboard text (case insensitive)."""
-        try:
-            raw = self.root.clipboard_get()
-            import re
-            urls = re.findall(r'https?://[^\s<>"{}|\\^`\[\]]+', raw, re.IGNORECASE)
-            return [u.strip() for u in urls if u.strip()]
-        except Exception:
-            return []
-
-    def paste_bulk_to_top(self):
-        """Paste URLs from clipboard to the top of bulk rows."""
-        urls = self._extract_urls_from_clipboard()
-        if not urls:
-            self.log_message(self.tr('No HTTP URLs found in clipboard'))
-            return
-        # Insert at beginning
-        for url in reversed(urls):
-            self.add_bulk_row_at_index(0, url, auto_parse_playlist=True)
-        self.log_message(self.translate_concat('Pasted ', f'{len(urls)}') + self.tr(' URL(s) to top'))
-        self.trigger_autosave()
-
-    def paste_bulk_to_bottom(self):
-        """Paste URLs from clipboard to the bottom of bulk rows."""
-        urls = self._extract_urls_from_clipboard()
-        if not urls:
-            self.log_message(self.tr('No HTTP URLs found in clipboard'))
-            return
-        for url in urls:
-            self.add_bulk_row(url, auto_parse_playlist=True)
-        self.log_message(self.translate_concat('Pasted ', f'{len(urls)}') + self.tr(' URL(s) to bottom'))
-        self.trigger_autosave()
-
-    def parse_all_bulk_urls(self):
-        """Serially resolve bulk-row titles; full playlist tree parse only for a single URL.
-
-        Multiple concurrent parse_playlist threads share one tree and race. For many bulk
-        URLs we fetch titles one-by-one into each row. With exactly one URL we still open
-        the full playlist selector.
-        """
-        if getattr(self, '_parse_all_running', False):
-            self.log_message(self.tr('[DEBUG] Parse All already running — ignored.'))
-            return
-
-        targets = []
-        for row in getattr(self, 'bulk_rows', []):
-            url = (row.get('var').get() if row.get('var') is not None else '').strip()
-            if url:
-                targets.append((row, url))
-
-        if not targets:
-            self.log_message(self.tr('No valid batch URLs found.'))
-            return
-
-        if len(targets) == 1:
-            self._parse_single_row_url(targets[0][1])
-            return
-
-        parse_options = self.collect_parse_options()
-        self.status_var.set(self.tr('Checking URL...'))
-        self.log_message(self.translate_concat('Parsing bulk URLs: ', f'{len(targets)}'))
-        self._parse_all_running = True
-
-        def worker():
-            ok = 0
-            try:
-                for index, (row, url) in enumerate(targets, start=1):
-                    if not getattr(self, '_parse_all_running', False):
-                        break
-                    title_var = row.get('playlist_var')
-                    try:
-                        cmd = [
-                            *core_launcher(),
-                            '--flat-playlist', '--dump-single-json', '--no-cache-dir',
-                            '--ignore-no-formats-error',
-                            '--remote-components', 'ejs:github',
-                        ]
-                        self.apply_parse_options_to_cmd(cmd, parse_options)
-                        cmd.append(url)
-                        env = self._subprocess_env()
-                        popen_kwargs = {
-                            'stdout': subprocess.PIPE,
-                            'stderr': subprocess.PIPE,
-                            'env': env,
-                            **self._subprocess_text_kwargs(),
-                        }
-                        if os.name == 'nt':
-                            popen_kwargs['creationflags'] = subprocess.CREATE_NEW_PROCESS_GROUP
-                        else:
-                            popen_kwargs['start_new_session'] = True
-                        proc = subprocess.Popen(cmd, **popen_kwargs)
-                        self._parse_all_process = proc
-                        try:
-                            stdout_data, _stderr_data = proc.communicate(timeout=45)
-                        except subprocess.TimeoutExpired:
-                            self._terminate_process(proc)
-                            raise
-                        finally:
-                            if getattr(self, '_parse_all_process', None) is proc:
-                                self._parse_all_process = None
-
-                        if not getattr(self, '_parse_all_running', False):
-                            break
-
-                        title = ''
-                        if stdout_data:
-                            info = json.loads(stdout_data)
-                            title = (info.get('title') or info.get('id') or '').strip()
-                        if title and title_var is not None:
-                            self.root.after(0, lambda t=title, v=title_var: v.set(t))
-                            ok += 1
-                        self.log_message(f'[{index}/{len(targets)}] {title or url}')
-                    except Exception as e:
-                        self.log_message(self.translate_concat(f'[{index}/{len(targets)}] ', str(e)))
-                self.log_message(
-                    self.translate_concat('Batch parsed: ', f'{ok}/{len(targets)}')
-                    + self.tr(' URL(s) ready.'))
-            finally:
-                self._parse_all_running = False
-                self.root.after(0, lambda: self.status_var.set(self.tr('Ready')))
-
-        threading.Thread(target=worker, daemon=True).start()
-
-    def add_bulk_row_at_index(self, index, initial_text='', initial_playlist='', auto_parse_playlist=False):
-        """Add a bulk row at specific index position."""
-        row = ttk.Frame(self.bulk_scroll_frame)
-
-        # Add drag handle
-        lbl_drag = ttk.Label(row, text=' ☰ ', cursor='fleur')
-        lbl_drag.pack(side=tk.LEFT, padx=(5, 2))
-        lbl_drag.bind('<Button-1>', lambda e, r=row: self._on_drag_start(e, r))
-        lbl_drag.bind('<B1-Motion>', lambda e, r=row: self._on_drag_motion(e, r))
-        lbl_drag.bind('<ButtonRelease-1>', lambda e, r=row: self._on_drag_stop(e, r))
-
-        var = tk.StringVar(value=initial_text)
-        var.trace_add('write', self.trigger_autosave)
-        entry = ttk.Entry(row, textvariable=var)
-        entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 5))
-
-        playlist_var = tk.StringVar(value=initial_playlist)
-        playlist_var.trace_add('write', self.trigger_autosave)
-        playlist_entry = ttk.Entry(row, textvariable=playlist_var, width=20)
-        playlist_entry.pack(side=tk.LEFT, padx=(0, 5))
-
-        entry.bind('<Return>', lambda e: self._on_bulk_url_return(var.get().strip(), playlist_var) if var.get().strip() else None)
-
-        btn_parse = ttk.Button(row, text=self.tr('Parse'), width=8, command=lambda v=var: self._parse_single_row_url(v.get()))
-        btn_parse.pack(side=tk.LEFT, padx=2)
-        self.register_translatable_widget(btn_parse, 'Parse')
-
-        btn_remove = ttk.Button(row, text='-', width=3, command=lambda r=row: self.remove_bulk_row(r))
-        btn_remove.pack(side=tk.LEFT)
-
-        # Insert into list at index
-        self.bulk_rows.insert(index, {'frame': row, 'var': var, 'playlist_var': playlist_var})
-        self.localize_widget_tree(row)
-
-        if auto_parse_playlist and initial_text.strip():
-            self._fetch_playlist_title_async(initial_text.strip(), playlist_var)
-
-        # Re-pack all rows in order
-        for r in self.bulk_rows:
-            r['frame'].pack_forget()
-        for r in self.bulk_rows:
-            r['frame'].pack(fill=tk.X, pady=2)
-
-    def clear_all_bulk_rows(self):
-        for row in self.bulk_rows[1:]:
-            row['frame'].destroy()
-        if self.bulk_rows:
-            self.bulk_rows = self.bulk_rows[:1]
-            self.bulk_rows[0]['var'].set('')
-            if 'playlist_var' in self.bulk_rows[0]:
-                self.bulk_rows[0]['playlist_var'].set('')
-        self.trigger_autosave()
-
-    def _restore_bulk_rows(self, urls, playlists=None):
-        """Restore bulk_rows from saved URLs."""
-        if not urls:
-            return
-        if playlists is None:
-            playlists = []
-
-        # Deduplicate while preserving order
-        seen = set()
-        unique_urls = []
-        unique_playlists = []
-        for i, url in enumerate(urls):
-            norm_url = url.strip()
-            if not norm_url:
-                continue
-            if norm_url in seen:
-                continue
-            seen.add(norm_url)
-            unique_urls.append(url)
-            pl = playlists[i] if i < len(playlists) else ''
-            unique_playlists.append(pl)
-
-        urls = unique_urls
-        playlists = unique_playlists
-
-        # Clear existing rows first
-        for row in self.bulk_rows[1:]:
-            row['frame'].destroy()
-        if self.bulk_rows:
-            self.bulk_rows[0]['var'].set(urls[0] if urls else '')
-            if 'playlist_var' in self.bulk_rows[0]:
-                self.bulk_rows[0]['playlist_var'].set(playlists[0] if playlists else '')
-            self.bulk_rows = self.bulk_rows[:1]
-            urls = urls[1:]
-            playlists = playlists[1:] if playlists else []
-        for i, url in enumerate(urls):
-            pl = playlists[i] if i < len(playlists) else ''
-            self.add_bulk_row(url, initial_playlist=pl)
-
-    def _on_bulk_url_return(self, url, title_var):
-        if url:
-            self._fetch_playlist_title_async(url, title_var)
-
-    def _fetch_playlist_title_async(self, url, title_var):
-        cookies_from_browser = self.get_control_text('cookies_from_browser')
-        cookies = self.get_control_text('cookies')
-
-        def worker():
-            try:
-                cmd = [*core_launcher(), '--flat-playlist', '--dump-single-json', url]
-                if cookies_from_browser:
-                    cmd.extend(['--cookies-from-browser', cookies_from_browser])
-                if cookies:
-                    cmd.extend(['--cookies', cookies])
-
-                result = subprocess.run(
-                    cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
-                    timeout=15, env=self._subprocess_env(), **self._subprocess_text_kwargs())
-                if result.stdout:
-                    info = json.loads(result.stdout)
-                    title = info.get('title')
-                    if title:
-                        self.root.after(0, lambda: title_var.set(title))
-            except Exception:
-                pass
-        threading.Thread(target=worker, daemon=True).start()
-
-    def _parse_single_row_url(self, url):
-        url = (url or '').strip()
-        if not url:
-            return
-        self._is_from_bulk_parse_flag = True
-        self.url_var.set(url)
-        self.parse_playlist()
-
-    def parse_single_url(self, url):
-        """Compatibility alias for previous function name."""
-        self._parse_single_row_url(url)
-
-    def parse_batch(self):
-        """Parse all batch inputs and normalize them into the main batch input box."""
-        file_path = self.get_batch_file_value()
-        row_urls = self.get_bulk_urls()
-        thread = threading.Thread(target=self._parse_batch_worker, args=(file_path, row_urls), daemon=True)
-        thread.start()
-
-    def _parse_batch_worker(self, file_path, row_urls):
-        urls = []
-
-        if file_path and os.path.isfile(file_path):
-            try:
-                urls.extend(self.read_batch_file_urls(file_path))
-            except Exception as e:
-                self.log_message(self.translate_concat('Error reading batch file: ', str(e)))
-        elif file_path:
-            urls.extend(line.strip() for line in file_path.splitlines() if line.strip())
-
-        urls.extend(row_urls)
-
-        normalized = self.dedupe_preserve_order(urls)
-
-        if not normalized:
-            self.log_message(self.tr('No valid batch URLs found.'))
-            self.root.after(0, lambda: self.status_var.set(self.tr('Ready')))
-            return
-
-        self.root.after(0, lambda: self._restore_bulk_rows(normalized))
-        self.root.after(0, lambda: self.batch_file_var.set(''))
-        self.log_message(self.translate_concat('Batch parsed: ', f'{len(normalized)}') + self.tr(' URL(s) ready.'))
-        self.root.after(0, lambda: self.status_var.set(self.tr('Ready')))
-
-    def create_playlist_tab(self, frame=None):
-        """Create Playlist Select tab using efficient Treeview"""
-        frame = frame or ttk.Frame(self.notebook, padding='10')
-
-        # Top control frame
-        top_ctrl = ttk.Frame(frame)
-        top_ctrl.pack(fill=tk.X, pady=(0, 5))
-
-        # Use three buttons for better control
-        btn_sel_all = ttk.Button(top_ctrl, text='Select All', command=lambda: self._on_playlist_select_all('all'))
-        btn_sel_all.pack(side=tk.LEFT, padx=(0, 2))
-        self.register_translatable_widget(btn_sel_all, 'Select All')
-
-        btn_sel_none = ttk.Button(top_ctrl, text='Deselect All', command=lambda: self._on_playlist_select_all('none'))
-        btn_sel_none.pack(side=tk.LEFT, padx=2)
-        self.register_translatable_widget(btn_sel_none, 'Deselect All')
-
-        btn_sel_inv = ttk.Button(top_ctrl, text='Invert Select', command=lambda: self._on_playlist_select_all('invert'))
-        btn_sel_inv.pack(side=tk.LEFT, padx=2)
-        self.register_translatable_widget(btn_sel_inv, 'Invert Select')
-
-        # Restore playlist option checkboxes (deduplicated) so they are visible once
-        # again in the playlist tab. Keep behavior consistent with internal vars.
-        self.playlist_reverse_var = tk.BooleanVar(value=False)
-        cb_rev = ttk.Checkbutton(
-            top_ctrl,
-            text='Reverse order',
-            variable=self.playlist_reverse_var,
-            command=self._on_playlist_option_changed,
-        )
-        cb_rev.pack(side=tk.LEFT, padx=(20, 0))
-        self.register_translatable_widget(cb_rev, 'Reverse order')
-
-        self.playlist_exclude_private_var = tk.BooleanVar(value=True)
-        cb_priv = ttk.Checkbutton(
-            top_ctrl,
-            text='Exclude private videos',
-            variable=self.playlist_exclude_private_var,
-            command=self._on_playlist_option_changed,
-        )
-        cb_priv.pack(side=tk.LEFT, padx=(20, 0))
-        self.register_translatable_widget(cb_priv, 'Exclude private videos')
-
-        # TREEVIEW for heavy listing
-        tree_frame = ttk.Frame(frame)
-        tree_frame.pack(fill=tk.BOTH, expand=True)
-
-        columns = ('status', 'index', 'title')
-        self.playlist_tree = ttk.Treeview(tree_frame, columns=columns, show='headings', selectmode='extended')
-
-        # Define headings
-        self.playlist_tree.heading('status', text=' ', anchor=tk.CENTER)
-        self.playlist_tree.heading('index', text='#')
-        self.playlist_tree.heading('title', text='Title')
-
-        # Define columns
-        self.playlist_tree.column('status', width=40, anchor=tk.CENTER, stretch=False)
-        self.playlist_tree.column('index', width=60, anchor=tk.CENTER, stretch=False)
-        self.playlist_tree.column('title', width=400, anchor=tk.W)
-
-        # Scrollbar
-        tree_scroll = ttk.Scrollbar(tree_frame, orient=tk.VERTICAL, command=self.playlist_tree.yview)
-        self.playlist_tree.configure(yscrollcommand=tree_scroll.set)
-
-        self.playlist_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        tree_scroll.pack(side=tk.RIGHT, fill=tk.Y)
-
-        # Bind events for interaction
-        self.playlist_tree.bind('<ButtonRelease-1>', self._on_tree_click)
-        self.playlist_tree.bind('<space>', self._on_tree_space)
-
-        return frame
-
-    def _on_tree_click(self, event):
-        item = self.playlist_tree.identify_row(event.y)
-        if item:
-            self._toggle_tree_item(item)
-
-    def _on_tree_space(self, event):
-        items = self.playlist_tree.selection()
-        if items:
-            for item in items:
-                self._toggle_tree_item(item)
-
-    def _toggle_tree_item(self, item):
-        values = list(self.playlist_tree.item(item, 'values'))
-        if values:
-            values[0] = '☐' if values[0] == '☑' else '☑'
-            self.playlist_tree.item(item, values=values)
-
-    def _on_playlist_select_all(self, mode='all'):
-        for item in self.playlist_tree.get_children():
-            values = list(self.playlist_tree.item(item, 'values'))
-            if mode == 'all':
-                values[0] = '☑'
-            elif mode == 'none':
-                values[0] = '☐'
-            elif mode == 'invert':
-                values[0] = '☐' if values[0] == '☑' else '☑'
-            self.playlist_tree.item(item, values=values)
-
-    def _on_playlist_mousewheel(self, event):
-        # Only scroll if the playlist tab is active
-        if self.notebook.select() == str(self.playlist_tab_frame):
-            if event.num == 4:  # Linux scroll up
-                self.playlist_tree.yview_scroll(-1, 'units')
-            elif event.num == 5:  # Linux scroll down
-                self.playlist_tree.yview_scroll(1, 'units')
-            else:  # Windows/Mac
-                self.playlist_tree.yview_scroll(int(-1 * (event.delta)), 'units')
-
-    def _on_playlist_option_changed(self):
-        if hasattr(self, 'playlist_entries_data') and self.playlist_entries_data:
-            self.root.after(0, self._show_playlist_tab, 'Playlist')
+    # Batch & Playlist tabs delegated to guiapi.tab_builders
+    create_batch_download_tab = tab_builders.create_batch_download_tab
+    _bind_batch_mousewheel = tab_builders._bind_batch_mousewheel
+    _on_batch_mousewheel = tab_builders._on_batch_mousewheel
+    _on_drag_start = tab_builders._on_drag_start
+    _on_drag_motion = tab_builders._on_drag_motion
+    _on_drag_stop = tab_builders._on_drag_stop
+    _swap_rows = tab_builders._swap_rows
+    add_bulk_row = tab_builders.add_bulk_row
+    remove_bulk_row = tab_builders.remove_bulk_row
+    remove_batch_row = tab_builders.remove_batch_row
+    _extract_urls_from_clipboard = tab_builders._extract_urls_from_clipboard
+    paste_bulk_to_top = tab_builders.paste_bulk_to_top
+    paste_bulk_to_bottom = tab_builders.paste_bulk_to_bottom
+    parse_all_bulk_urls = tab_builders.parse_all_bulk_urls
+    add_bulk_row_at_index = tab_builders.add_bulk_row_at_index
+    clear_all_bulk_rows = tab_builders.clear_all_bulk_rows
+    _restore_bulk_rows = tab_builders._restore_bulk_rows
+    _on_bulk_url_return = tab_builders._on_bulk_url_return
+    _fetch_playlist_title_async = tab_builders._fetch_playlist_title_async
+    _parse_single_row_url = tab_builders._parse_single_row_url
+    parse_single_url = tab_builders.parse_single_url
+    parse_batch = tab_builders.parse_batch
+    _parse_batch_worker = tab_builders._parse_batch_worker
+    create_playlist_tab = tab_builders.create_playlist_tab
+    _on_tree_click = tab_builders._on_tree_click
+    _on_tree_space = tab_builders._on_tree_space
+    _toggle_tree_item = tab_builders._toggle_tree_item
+    _on_playlist_select_all = tab_builders._on_playlist_select_all
+    _on_playlist_mousewheel = tab_builders._on_playlist_mousewheel
+    _on_playlist_option_changed = tab_builders._on_playlist_option_changed
 
     # Lazy tab builders delegated to guiapi.tab_builders
     create_general_tab = tab_builders.create_general_tab

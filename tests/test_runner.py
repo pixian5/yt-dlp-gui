@@ -6,6 +6,7 @@ import sys
 from guiapi.runner import (
     SubprocessRunner,
     augmented_path,
+    check_runtime_dependencies,
     extra_bin_dirs,
     spawn_process,
     subprocess_env,
@@ -68,3 +69,46 @@ def test_runner_cancel():
     runner.cancel()
     assert runner.is_cancelled()
     assert runner.run_task(['--version']) == -1
+
+
+def test_check_runtime_dependencies_structure():
+    deps = check_runtime_dependencies()
+    for tool in ('ffmpeg', 'ffprobe', 'node', 'deno'):
+        assert tool in deps
+        assert 'available' in deps[tool]
+        assert 'path' in deps[tool]
+        assert 'version' in deps[tool]
+        assert isinstance(deps[tool]['available'], bool)
+
+
+def test_check_runtime_dependencies_parsing(monkeypatch):
+    import guiapi.runner as runner_mod
+
+    def fake_which(tool, path=None):
+        if tool in ('ffmpeg', 'node'):
+            return f'/usr/local/bin/{tool}'
+        return None
+
+    class DummyProc:
+        def __init__(self, output):
+            self.returncode = 0
+            self.stdout = output
+            self.stderr = ''
+
+    def fake_run(cmd, *args, **kwargs):
+        if 'ffmpeg' in cmd[0]:
+            return DummyProc('ffmpeg version 6.1.1 Copyright (c) 2000-2023\n')
+        if 'node' in cmd[0]:
+            return DummyProc('v20.10.0\n')
+        return DummyProc('')
+
+    monkeypatch.setattr(runner_mod.shutil, 'which', fake_which)
+    monkeypatch.setattr(runner_mod.subprocess, 'run', fake_run)
+
+    deps = check_runtime_dependencies()
+    assert deps['ffmpeg']['available'] is True
+    assert deps['ffmpeg']['version'] == '6.1.1'
+    assert deps['node']['available'] is True
+    assert deps['node']['version'] == 'v20.10.0'
+    assert deps['deno']['available'] is False
+
